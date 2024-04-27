@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <Servo.h>
 
+#include "MS5837.h"
+
 #define AMP_LIMIT (20) // fuse melts at 25 amps, leave 2 amp clearance
 #define TRANS_ROT_AMP_LIMIT (13)
 #define VERT_AMP_LIMIT (AMP_LIMIT - TRANS_ROT_AMP_LIMIT)
@@ -148,6 +150,10 @@ typedef struct {
 // declared globally 
 AMP_LIST;
 
+
+MS5837 bar02_sensor;
+
+// hPa/mbar: 1.75, 0.0003, 0
 PID depth_hold_controller(1.75, 0.0003, 0);
 PID roll_hold_controller(3, 0.5, 0);
 
@@ -174,6 +180,8 @@ bool roll_set_avl = true;
 char buff[200];
 
 void setup() {
+  Serial.begin(9600);
+  Serial.println("Starting...");
   memset(&input_data, 0, sizeof(input_data));
   
   thrusters.lvert.attach(THRUSTER_LVERT_PIN);
@@ -184,8 +192,12 @@ void setup() {
   thrusters.br.attach(THRUSTER_BR_PIN);
 
   roll_hold_controller.target = NEUTRAL_ROLL_DEG;
-  
-  Serial.begin(9600);
+
+  while(!bar02_sensor.init()) {
+    Serial.println("Failed to initialize bar02");
+    delay(1000);
+  }
+
   Serial.flush();
 }
 
@@ -202,13 +214,83 @@ inline bool nmea_checksum() {
   return checksum == strtol(checksum_char, NULL, 16);
 }
 
-inline void power_thrusters() {
-  thrusters.lvert.writeMicroseconds(THRUSTER_POWER(control_data.lvert_power));
-  thrusters.rvert.writeMicroseconds(THRUSTER_POWER(control_data.rvert_power));
-  thrusters.fl.writeMicroseconds(THRUSTER_POWER(control_data.fl_power));
-  thrusters.fr.writeMicroseconds(THRUSTER_POWER(control_data.fr_power));
-  thrusters.bl.writeMicroseconds(THRUSTER_POWER(control_data.bl_power));
-  thrusters.br.writeMicroseconds(THRUSTER_POWER(control_data.br_power));
+inline void drain_serial_input() {
+  while(Serial.peek() != '$') {
+    Serial.read();
+  }
+}
+
+inline void read_serial_input() {
+  if(Serial.available() > 0) {
+    if (Serial.peek() != '$') {
+      Serial.write("ERRSTX ");
+      Serial.println(Serial.read(), HEX);
+      drain_serial_input();
+      return;
+    }
+    Serial.read();
+    Serial.readBytes(sig, 5);
+    if (strcmp(sig, "RPCTL") != 0) {
+      Serial.write("ERRSIG ");
+      Serial.println(sig);
+      drain_serial_input();
+      return;
+    }
+    Serial.readBytes((char*)&input_data, sizeof(input_data));
+    if (Serial.peek() != '*') {
+      Serial.write("ERRTRM ");
+      Serial.println(Serial.read());
+      drain_serial_input();
+      return;
+    }
+    Serial.read();
+    Serial.readBytes(checksum_char, 2);
+    if (!nmea_checksum()) {
+      Serial.write("ERRCHK\n");
+      drain_serial_input();
+      return;
+    }
+  }
+  drain_serial_input();
+}
+
+inline void set_consts() {
+  if(input_data.ABS_LT > 100) {
+    mult = SLOW_MULT;
+  } else {
+    mult = DEFAULT_MULT;
+  }
+  if(input_data.BTN_EAST) {
+    if(depth_hold_btn_avl) {
+      depth_hold = !depth_hold;
+      stabilize = false;
+    }
+    depth_hold_btn_avl = false;
+  } else {
+    depth_hold_btn_avl = true;
+  }
+  /*
+  if(input_data.BTN_WEST) {
+    if(stabilize_btn_avl) {
+      stabilize = !stabilize;
+    }
+    stabilize_btn_avl = false;
+  } else {
+    stabilize_btn_avl = true;
+  }
+  */
+}
+
+inline void read_pressure_data() {
+  #define pconv ((double)200/250)
+  aux_data.pressure_hpa = (double)input_data.ABS_RT;
+
+  // aux_data.pressure_hpa = bar02_sensor.pressure();
+}
+
+inline void read_gyro_data() {
+  #define rconv ((double)150/JOYSTICK_MAGNITUDE)
+  aux_data.roll = input_data.ABS_LX * rconv;
 }
 
 inline void calc_vert_power() {
@@ -319,87 +401,19 @@ inline void limit_current() {
   //Serial.println(PWR_TO_AMPS(control_data.fl_power) + PWR_TO_AMPS(control_data.fr_power) + PWR_TO_AMPS(control_data.bl_power) + PWR_TO_AMPS(control_data.br_power));
 }
 
-inline void drain_serial_input() {
-  while(Serial.peek() != '$') {
-    Serial.read();
-  }
-}
-
-inline void read_serial_input() {
-  if(Serial.available() > 0) {
-    if (Serial.peek() != '$') {
-      Serial.write("ERRSTX ");
-      Serial.println(Serial.read(), HEX);
-      drain_serial_input();
-      return;
-    }
-    Serial.read();
-    Serial.readBytes(sig, 5);
-    if (strcmp(sig, "RPCTL") != 0) {
-      Serial.write("ERRSIG ");
-      Serial.println(sig);
-      drain_serial_input();
-      return;
-    }
-    Serial.readBytes((char*)&input_data, sizeof(input_data));
-    if (Serial.peek() != '*') {
-      Serial.write("ERRTRM ");
-      Serial.println(Serial.read());
-      drain_serial_input();
-      return;
-    }
-    Serial.read();
-    Serial.readBytes(checksum_char, 2);
-    if (!nmea_checksum()) {
-      Serial.write("ERRCHK\n");
-      drain_serial_input();
-      return;
-    }
-  }
-  drain_serial_input();
-}
-
-inline void read_pressure_data() {
-  #define pconv ((double)200/250)
-  aux_data.pressure_hpa = (double)input_data.ABS_RT;
-}
-
-inline void read_gyro_data() {
-  #define rconv ((double)150/JOYSTICK_MAGNITUDE)
-  aux_data.roll = input_data.ABS_LX * rconv;
-}
-
-inline void set_consts() {
-  if(input_data.ABS_LT > 100) {
-    mult = SLOW_MULT;
-  } else {
-    mult = DEFAULT_MULT;
-  }
-  if(input_data.BTN_EAST) {
-    if(depth_hold_btn_avl) {
-      depth_hold = !depth_hold;
-      stabilize = false;
-    }
-    depth_hold_btn_avl = false;
-  } else {
-    depth_hold_btn_avl = true;
-  }
-  /*
-  if(input_data.BTN_WEST) {
-    if(stabilize_btn_avl) {
-      stabilize = !stabilize;
-    }
-    stabilize_btn_avl = false;
-  } else {
-    stabilize_btn_avl = true;
-  }
-  */
+inline void power_thrusters() {
+  thrusters.lvert.writeMicroseconds(THRUSTER_POWER(control_data.lvert_power));
+  thrusters.rvert.writeMicroseconds(THRUSTER_POWER(control_data.rvert_power));
+  thrusters.fl.writeMicroseconds(THRUSTER_POWER(control_data.fl_power));
+  thrusters.fr.writeMicroseconds(THRUSTER_POWER(control_data.fr_power));
+  thrusters.bl.writeMicroseconds(THRUSTER_POWER(control_data.bl_power));
+  thrusters.br.writeMicroseconds(THRUSTER_POWER(control_data.br_power));
 }
 
 void loop() {
   read_serial_input();
-  read_pressure_data();
   set_consts();
+  read_pressure_data();
   calc_vert_power();
   calc_trans_rot_power();
   limit_current();
