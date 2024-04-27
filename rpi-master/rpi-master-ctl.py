@@ -25,7 +25,7 @@ except:
     print("socket connection failed")
     exit(1)
 
-gamepad_map = {
+logitech_f310_map = {
     "ABS_X": 0, # i16, LSX
     "ABS_Y": 1, # i16, LSY
     "ABS_RX": 2, # i16, RSX
@@ -45,6 +45,8 @@ gamepad_map = {
     "BTN_START": 16, # 0, 1, Start
     "BTN_SELECT": 17 # 0, 1, Back
 }
+
+gamepad_map = logitech_f310_map
 
 gamepad_inputs: list[int] = [0] * GAMEPAD_NUM_INPUTS
 gamepad_input_tuple: tuple[int, ...] = tuple(gamepad_inputs)

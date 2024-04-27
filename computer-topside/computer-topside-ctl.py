@@ -2,7 +2,7 @@ import socket
 from inputs import get_gamepad
 import typing
 
-HOST = '192.168.68.43'
+HOST = '192.168.1.75'
 PORT = 10110 # standard NMEA port
 
 NMEA_HEADER = "$CTCTL" # computer topside control

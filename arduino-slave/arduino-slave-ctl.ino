@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <Servo.h>
 
-#define AMP_LIMIT (23) // fuse melts at 25 amps, leave 2 amp clearance
-#define TRANS_ROT_AMP_LIMIT (15)
+#define AMP_LIMIT (20) // fuse melts at 25 amps, leave 2 amp clearance
+#define TRANS_ROT_AMP_LIMIT (13)
 #define VERT_AMP_LIMIT (AMP_LIMIT - TRANS_ROT_AMP_LIMIT)
 // (AMPS) taken from blue robotics t200 specs @ 12V
 // https://cad.bluerobotics.com/T200-Public-Performance-Data-10-20V-September-2019.xlsx
@@ -36,7 +36,7 @@
 #define THRUSTER_BL_PIN 6
 #define THRUSTER_BR_PIN 7
 
-#define THRUSTER_VERT_DIR 1
+#define THRUSTER_VERT_DIR -1
 #define THRUSTER_FL_DIR -1
 #define THRUSTER_FR_DIR -1
 #define THRUSTER_BL_DIR 1
@@ -234,7 +234,6 @@ inline void calc_vert_power() {
     }
     //Serial.println((int32_t)unscaled_vert_power);
   }
-  Serial.println((int32_t)unscaled_vert_power);
   control_data.lvert_power = unscaled_vert_power;
   control_data.rvert_power = unscaled_vert_power;
 }
@@ -281,6 +280,7 @@ inline void limit_current() {
   double br_amps = PWR_TO_AMPS(control_data.br_power);
   double vert_amps = lvert_amps + rvert_amps;
   double trans_rot_amps = fl_amps + fr_amps + bl_amps + br_amps;
+  // Serial.println(control_data.lvert_power);
   if(vert_amps + trans_rot_amps <= AMP_LIMIT) {
     return;
   }
@@ -296,28 +296,27 @@ inline void limit_current() {
       control_data.bl_power = (int32_t)((double)control_data.bl_power * PWR_REDUCTION_FACTOR);
       control_data.br_power = (int32_t)((double)control_data.br_power * PWR_REDUCTION_FACTOR);
     }
-    return;
   } 
   // vertical amps are within limit, bring trans rot amps down to overall AMP_LIMIT
-  if(trans_rot_amps > TRANS_ROT_AMP_LIMIT) {
+  else if(trans_rot_amps > TRANS_ROT_AMP_LIMIT) {
     while(PWR_TO_AMPS(control_data.fl_power) + PWR_TO_AMPS(control_data.fr_power) + PWR_TO_AMPS(control_data.bl_power) + PWR_TO_AMPS(control_data.br_power) + vert_amps > AMP_LIMIT) {
       control_data.fl_power = (int32_t)((double)control_data.fl_power * PWR_REDUCTION_FACTOR);
       control_data.fr_power = (int32_t)((double)control_data.fr_power * PWR_REDUCTION_FACTOR);
       control_data.bl_power = (int32_t)((double)control_data.bl_power * PWR_REDUCTION_FACTOR);
       control_data.br_power = (int32_t)((double)control_data.br_power * PWR_REDUCTION_FACTOR);
     }
-    return;
   }
   // trans rot amps are within limit, bring vertical amps down to overall AMP_LIMIT
-  if(vert_amps > VERT_AMP_LIMIT) {
+  else if(vert_amps > VERT_AMP_LIMIT) {
     while(PWR_TO_AMPS(control_data.lvert_power) + PWR_TO_AMPS(control_data.rvert_power) + trans_rot_amps > AMP_LIMIT) {
       control_data.lvert_power = (int32_t)((double)control_data.lvert_power * PWR_REDUCTION_FACTOR);
       control_data.rvert_power = (int32_t)((double)control_data.rvert_power * PWR_REDUCTION_FACTOR);
     }
-    return;
   }
-  Serial.println(PWR_TO_AMPS(control_data.lvert_power) + PWR_TO_AMPS(control_data.rvert_power));
-  Serial.println(PWR_TO_AMPS(control_data.fl_power) + PWR_TO_AMPS(control_data.fr_power) + PWR_TO_AMPS(control_data.bl_power) + PWR_TO_AMPS(control_data.br_power));
+  //Serial.print("v");
+  //Serial.println(PWR_TO_AMPS(control_data.lvert_power) + PWR_TO_AMPS(control_data.rvert_power));
+  //Serial.print("h");
+  //Serial.println(PWR_TO_AMPS(control_data.fl_power) + PWR_TO_AMPS(control_data.fr_power) + PWR_TO_AMPS(control_data.bl_power) + PWR_TO_AMPS(control_data.br_power));
 }
 
 inline void drain_serial_input() {
