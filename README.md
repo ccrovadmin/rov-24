@@ -6,6 +6,7 @@ Instal the Arduino CLI on RPi with `curl -fsSL https://raw.githubusercontent.com
 ### IF YOU ARE RUNNING A METRO (or other adafruit SAMD board)
 Run `arduino-cli config init` and add `https://adafruit.github.io/arduino-board-index/package_adafruit_index.json` to your `arduino-cli.yaml` file in the  `board_manager: additional_urls:` list field. Then run `arduino-cli core update-index` & `arduino-cli core install adafruit:samd`.
 
+
 Install the necessary libraries:
 `arduino-cli lib install 'BlueRobotics MS5837 Library'`
 
