@@ -11,7 +11,7 @@ Install the necessary libraries:
 `arduino-cli lib install 'BlueRobotics MS5837 Library'`
 
 And finally to upload the control code (from `arduino-slave/`):
-`arduino-cli compile --fbqn [FBQN] .`
+`arduino-cli compile --fbqn [FBQN]`.
 If you're running a Metro M4, your FBQN will be `adafruit:samd:adafruit_metro_m4`.
 
 
