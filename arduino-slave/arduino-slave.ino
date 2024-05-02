@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <Servo.h>
 
+#include <Wire.h>
+
 #include "MS5837.h"
 
 #define AMP_LIMIT (20) // fuse melts at 25 amps, leave 2 amp clearance
@@ -32,7 +34,7 @@
 #define NEUTRAL_ROLL_DEG 0
 
 #define THRUSTER_LVERT_PIN 2
-#define THRUSTER_RVERT_PIN 13
+#define THRUSTER_RVERT_PIN 12
 #define THRUSTER_FL_PIN 4
 #define THRUSTER_FR_PIN 5
 #define THRUSTER_BL_PIN 6
@@ -183,6 +185,8 @@ void setup() {
   Serial.begin(9600);
   Serial.println("Starting...");
   memset(&input_data, 0, sizeof(input_data));
+
+  Wire.begin();
   
   thrusters.lvert.attach(THRUSTER_LVERT_PIN);
   thrusters.rvert.attach(THRUSTER_RVERT_PIN);
@@ -193,9 +197,8 @@ void setup() {
 
   roll_hold_controller.target = NEUTRAL_ROLL_DEG;
 
-  while(!bar02_sensor.init()) {
+  if(!bar02_sensor.init()) {
     Serial.println("Failed to initialize bar02");
-    delay(1000);
   }
 
   Serial.flush();
@@ -282,10 +285,10 @@ inline void set_consts() {
 }
 
 inline void read_pressure_data() {
-  #define pconv ((double)200/250)
-  aux_data.pressure_hpa = (double)input_data.ABS_RT;
+  // #define pconv ((double)200/250)
+  // aux_data.pressure_hpa = (double)input_data.ABS_RT;
 
-  // aux_data.pressure_hpa = bar02_sensor.pressure();
+  aux_data.pressure_hpa = bar02_sensor.pressure();
 }
 
 inline void read_gyro_data() {
@@ -419,5 +422,6 @@ void loop() {
   limit_current();
   power_thrusters();
   //Serial.println((int32_t)THRUSTER_POWER(control_data.lvert_power));
+  Serial.println(aux_data.pressure_hpa);
   //Serial.println((int32_t)control_data.lvert_power);
 }
