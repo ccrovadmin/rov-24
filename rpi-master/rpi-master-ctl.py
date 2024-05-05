@@ -51,14 +51,20 @@ gamepad_map = logitech_f310_map
 gamepad_inputs: list[int] = [0] * GAMEPAD_NUM_INPUTS
 gamepad_input_tuple: tuple[int, ...] = tuple(gamepad_inputs)
 
-ser = serial.Serial(METRO_M4_PIPE, 9600, write_timeout = 2)
+nmea_bytes = b''
+
+ser = serial.Serial(METRO_M4_PIPE, 115200, write_timeout = 2)
 ser.flush()
 
 def monitor_socket_input():
-    datalen: int = int(s.recv(4).decode('ASCII'))
+    while True:
+        try:
+            datalen: int = int(s.recv(4).decode('ASCII'))
+            break
+        except ValueError:
+            pass         
     data: str = s.recv(datalen).decode('ASCII')
-    #print("Data received: ", data)
-    chunks: list[str] = data.split(",")
+    chunks: list[str] = data.split(",");
     if(chunks[0] != "$CTCTL"):
         print("Invalid NMEA header")
         return
@@ -66,7 +72,17 @@ def monitor_socket_input():
         code, state = event.split(":")
         gamepad_inputs[gamepad_map[code]] = int(state)
 
+def transmit_serial():
+    time.sleep(1)
+    while(True):
+        ser.write(nmea_bytes)
+        time.sleep(0.1)
+
 def main():
+    global nmea_bytes
+    transmission_thread = threading.Thread(target=transmit_serial)
+    transmission_thread.daemon = True
+    transmission_thread.start()
     while True:
         monitor_socket_input()
         if(ser.in_waiting > 0):
@@ -77,9 +93,6 @@ def main():
                 print("check transmission code")
         gamepad_input_tuple = tuple(gamepad_inputs)
         #print(gamepad_input_tuple)
-        nmea_bytes: bytes = nmea_encode.nmea_encode(gamepad_input_tuple)
-        #print(nmea_bytes)
-        #print(ser.write(nmea_bytes))
-        ser.write(nmea_bytes)
+        nmea_bytes = nmea_encode.nmea_encode(gamepad_input_tuple)
 
 main()
