@@ -11,8 +11,8 @@
 #define INC_PROG_ITER(i) i++
 #define SERIAL_TRANSMISSION_WRAP (50)
 
-#define AMP_LIMIT (20) // fuse melts at 25 amps, leave 2 amp clearance
-#define TRANS_ROT_AMP_LIMIT (13)
+#define AMP_LIMIT (23) // fuse melts at 25 amps, leave 2 amp clearance
+#define TRANS_ROT_AMP_LIMIT (15)
 #define VERT_AMP_LIMIT (AMP_LIMIT - TRANS_ROT_AMP_LIMIT)
 // (AMPS) taken from blue robotics t200 specs @ 12V
 // https://cad.bluerobotics.com/T200-Public-Performance-Data-10-20V-September-2019.xlsx
@@ -33,6 +33,12 @@
 #define NORMALIZE_JOYSTICK(x) ((int32_t)((int32_t)x * (double)NORMALIZE_JOYSTICK_FACTOR))
 #define NORMALIZE_DPAD(x) ((int32_t)(((double)x * (double)NORMALIZE_DPAD_FACTOR)))
 #define THRUSTER_POWER(x) (int32_t)(1500 + x)
+
+#define DPAD_VERT_GAIN ((double)0.45)
+
+#define ROT_GAIN ((double)0.3)
+
+#define DEADZONE_CONST 2000
 
 #define NEUTRAL_ROLL_DEG 0
 
@@ -187,7 +193,7 @@ bool roll_set_avl = true;
 char buff[200];
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   Serial.println("Starting...");
   memset(&input_data, 0, sizeof(input_data));
 
@@ -208,6 +214,7 @@ void setup() {
   }
   bar02_sensor.setModel(MS5837::MS5837_02BA);
   bar02_sensor.setFluidDensity(997);
+  Serial.setTimeout(10);
   Serial.flush();
 }
 
@@ -232,35 +239,58 @@ inline void drain_serial_input() {
 
 inline void read_serial_input() {
   if(Serial.available() > 0) {
-    if(Serial.peek() != '$' && (uint8_t)Serial.peek() != 0) {
-      Serial.write("ERRSTX ");
+    if((uint8_t)Serial.peek() == 0) {
+      Serial.read();
+    }
+    if(Serial.available() == 0) {
+      return;
+    }
+    if(Serial.peek() != '$') {
+      Serial.print("ERRSTX ");
       Serial.println(Serial.read(), HEX);
-      drain_serial_input();
+      //drain_serial_input();
       return;
     }
     Serial.read();
+    Serial.println("unblocked 1");
+    delay(5);
     Serial.readBytes(sig, 5);
+    delay(5);
+    Serial.println("unblocked 2");
+    delay(5);
     if(strcmp(sig, "RPCTL") != 0) {
-      Serial.write("ERRSIG ");
+      Serial.print("ERRSIG ");
       Serial.println(sig);
-      drain_serial_input();
+      //drain_serial_input();
       return;
     }
+    Serial.println("unblocked 3");
+    delay(5);
     Serial.readBytes((char*)&input_data, sizeof(input_data));
-    if(Serial.peek() != '*') {
-      Serial.write("ERRTRM ");
+    delay(5);
+    Serial.println("unblocked 4");
+    delay(5);
+    if(Serial.peek() != '*') {` 
+      Serial.print("ERRTRM ");
       Serial.println(Serial.read());
-      drain_serial_input();
+      //drain_serial_input();
       return;
     }
     Serial.read();
+    Serial.println("unblocked 5");
+    delay(5);
     Serial.readBytes(checksum_char, 2);
+    delay(5);
+    Serial.println("unblocked 6");
+    delay(5);
     if(!nmea_checksum()) {
-      Serial.write("ERRCHK\n");
-      drain_serial_input();
+      Serial.print("ERRCHK\n");
+      //drain_serial_input();
       return;
     }
   }
+  Serial.println(input_data.BTN_NORTH);
+  delay(5);
 }
 
 inline void set_consts() {
@@ -305,6 +335,11 @@ inline void read_gyro_data() {
 
 inline void calc_vert_power() {
   int32_t unscaled_vert_power;
+  if(input_data.ABS_HAT0Y != 0) {
+    depth_set_avl = true;
+    unscaled_vert_power = NORMALIZE_DPAD(input_data.ABS_HAT0Y) * DPAD_VERT_GAIN * THRUSTER_VERT_DIR;
+    return;
+  }
   if(!depth_hold || abs(input_data.ABS_RY) > 150) {
     depth_set_avl = true;
     unscaled_vert_power = NORMALIZE_JOYSTICK(input_data.ABS_RY) * mult * THRUSTER_VERT_DIR;
@@ -334,13 +369,13 @@ inline void calc_trans_rot_power() {
   int32_t unscaled_br_power;
   double normalize = 1;
   if(input_data.ABS_HAT0X != 0 || input_data.ABS_HAT0Y != 0) {
-    
+
   }
   if(!stabilize || abs(input_data.ABS_LX) > 2000 || abs(input_data.ABS_LY) > 2000 || abs(input_data.ABS_RX) > 2000 || abs(input_data.ABS_RY) > 2000 || input_data.ABS_HAT0X != 0 || input_data.ABS_HAT0Y != 0) {
-    unscaled_fl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - NORMALIZE_JOYSTICK(input_data.ABS_LX) - NORMALIZE_JOYSTICK(input_data.ABS_RX);
-    unscaled_fr_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + NORMALIZE_JOYSTICK(input_data.ABS_LX) + NORMALIZE_JOYSTICK(input_data.ABS_RX);
-    unscaled_bl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - NORMALIZE_JOYSTICK(input_data.ABS_LX) + NORMALIZE_JOYSTICK(input_data.ABS_RX);
-    unscaled_br_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + NORMALIZE_JOYSTICK(input_data.ABS_LX) - NORMALIZE_JOYSTICK(input_data.ABS_RX);
+    unscaled_fl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - NORMALIZE_JOYSTICK(input_data.ABS_LX) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    unscaled_fr_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + NORMALIZE_JOYSTICK(input_data.ABS_LX) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    unscaled_bl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - NORMALIZE_JOYSTICK(input_data.ABS_LX) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    unscaled_br_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + NORMALIZE_JOYSTICK(input_data.ABS_LX) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
     if ((NORMALIZE_JOYSTICK(abs(input_data.ABS_LY)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_LX)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_RX))) > ESC_MAGNITUDE) {
       normalize = (NORMALIZE_JOYSTICK(abs(input_data.ABS_LY)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_LX)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_RX)))/(double)ESC_MAGNITUDE;
     }
@@ -415,8 +450,25 @@ inline void power_thrusters() {
   thrusters.br.writeMicroseconds(THRUSTER_POWER(control_data.br_power));
 }
 
+inline void elim_deadzones() {
+  // depends on controller
+  if(abs(input_data.ABS_LX) < DEADZONE_CONST) {
+    input_data.ABS_LX = 0;
+  }
+  if(abs(input_data.ABS_LY) < DEADZONE_CONST) {
+    input_data.ABS_LY = 0;
+  }
+  if(abs(input_data.ABS_RX) < DEADZONE_CONST) {
+    input_data.ABS_RX = 0;
+  }
+  if(abs(input_data.ABS_RY) < DEADZONE_CONST) {
+    input_data.ABS_RY = 0;
+  }
+}
+
 void loop() {
   read_serial_input();
+  elim_deadzones();
   set_consts();
   read_pressure_data();
   calc_vert_power();
@@ -424,6 +476,7 @@ void loop() {
   limit_current();
   power_thrusters();
   prog_iter++;
+  Serial.println(prog_iter);
   if(prog_iter % SERIAL_TRANSMISSION_WRAP == 0) {
     Serial.println(PWR_TO_AMPS(control_data.lvert_power) + PWR_TO_AMPS(control_data.rvert_power) + PWR_TO_AMPS(control_data.fl_power) + PWR_TO_AMPS(control_data.fr_power) + PWR_TO_AMPS(control_data.bl_power) + PWR_TO_AMPS(control_data.br_power));
     Serial.println(aux_data.depth);

@@ -53,7 +53,7 @@ gamepad_input_tuple: tuple[int, ...] = tuple(gamepad_inputs)
 
 nmea_bytes = b''
 
-ser = serial.Serial(METRO_M4_PIPE, 115200, write_timeout = 2)
+ser = serial.Serial(METRO_M4_PIPE, 9600, write_timeout = 2)
 ser.flush()
 
 def monitor_socket_input():
