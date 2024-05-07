@@ -20,6 +20,7 @@ s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 print("socket created")
 try:
     s.connect((HOST, PORT))
+    s.setblocking(0)
     print("socket connected")
 except:
     print("socket connection failed")
@@ -57,12 +58,10 @@ ser = serial.Serial(METRO_M4_PIPE, 9600, write_timeout = 2)
 ser.flush()
 
 def monitor_socket_input():
-    while True:
-        try:
-            datalen: int = int(s.recv(4).decode('ASCII'))
-            break
-        except ValueError:
-            pass         
+    try:
+        datalen: int = int(s.recv(4).decode('ASCII'))
+    except:
+        return         
     data: str = s.recv(datalen).decode('ASCII')
     chunks: list[str] = data.split(",");
     if(chunks[0] != "$CTCTL"):
@@ -71,6 +70,7 @@ def monitor_socket_input():
     for event in chunks[1:]:
         code, state = event.split(":")
         gamepad_inputs[gamepad_map[code]] = int(state)
+    return
 
 def transmit_serial():
     time.sleep(1)

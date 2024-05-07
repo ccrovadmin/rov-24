@@ -9,9 +9,9 @@
 #include "MS5837.h"
 
 #define INC_PROG_ITER(i) i++
-#define SERIAL_TRANSMISSION_WRAP (50)
+#define SERIAL_TRANSMISSION_WRAP (3)
 
-#define AMP_LIMIT (23) // fuse melts at 25 amps, leave 2 amp clearance
+#define AMP_LIMIT (20) // fuse melts at 25 amps, leave 5 amp clearance
 #define TRANS_ROT_AMP_LIMIT (15)
 #define VERT_AMP_LIMIT (AMP_LIMIT - TRANS_ROT_AMP_LIMIT)
 // (AMPS) taken from blue robotics t200 specs @ 12V
@@ -21,9 +21,6 @@
 // ternaries are spaghetti to round to higher current value if not divisible by 4
 #define PWR_TO_AMPS(x) (pwr_to_current[(x % 4 == 0) ? (x/4 + 100) : ((x < 0) ? (x/4 + 100 - 1 ) : (x/4 + 100 + 1))])
 #define PWR_REDUCTION_FACTOR ((double)0.95)
-
-#define DEFAULT_MULT ((double)0.7)
-#define SLOW_MULT ((double)0.3)
 
 #define ESC_MAGNITUDE (400)
 #define JOYSTICK_MAGNITUDE (32767)
@@ -166,9 +163,14 @@ AMP_LIST;
 
 MS5837 bar02_sensor;
 
-// hPa/mbar: 1.75, 0.0003, 0
-PID depth_hold_controller(1.75, 0.0003, 0);
-PID roll_hold_controller(3, 0.5, 0);
+// hPa/mbar: 2, 0.0003, 0
+// deg: 3, 0.0003, 0
+PID depth_hold_controller(2, 0.0003, 0);
+PID roll_hold_controller(3, 0.0003, 0);
+PID yaw_hold_controller(3, 0.0003, 0);
+
+double DEFAULT_MULT = (double)0.7;
+double SLOW_MULT = (double)0.3;
 
 char sig[6];
 char checksum_char[3];
@@ -179,6 +181,12 @@ control_data_t control_data = {1500, 1500, 1500, 1500, 1500, 1500};
 thrusters_t thrusters;
 
 double mult = DEFAULT_MULT;
+
+bool slowmode = false;
+bool slowmode_btn_avl = true;
+
+bool gain_dec_btn_avl = true;
+bool gain_inc_btn_avl = true;
 
 bool depth_hold = false;
 bool stabilize = false;
@@ -239,7 +247,7 @@ inline void drain_serial_input() {
 
 inline void read_serial_input() {
   if(Serial.available() > 0) {
-    if((uint8_t)Serial.peek() == 0) {
+    if(Serial.peek() != '$') {
       Serial.read();
     }
     if(Serial.available() == 0) {
@@ -252,52 +260,38 @@ inline void read_serial_input() {
       return;
     }
     Serial.read();
-    Serial.println("unblocked 1");
-    delay(5);
     Serial.readBytes(sig, 5);
-    delay(5);
-    Serial.println("unblocked 2");
-    delay(5);
     if(strcmp(sig, "RPCTL") != 0) {
       Serial.print("ERRSIG ");
       Serial.println(sig);
       //drain_serial_input();
       return;
     }
-    Serial.println("unblocked 3");
-    delay(5);
     Serial.readBytes((char*)&input_data, sizeof(input_data));
-    delay(5);
-    Serial.println("unblocked 4");
-    delay(5);
-    if(Serial.peek() != '*') {` 
+    if(Serial.peek() != '*') {
       Serial.print("ERRTRM ");
       Serial.println(Serial.read());
       //drain_serial_input();
       return;
     }
     Serial.read();
-    Serial.println("unblocked 5");
-    delay(5);
     Serial.readBytes(checksum_char, 2);
-    delay(5);
-    Serial.println("unblocked 6");
-    delay(5);
     if(!nmea_checksum()) {
       Serial.print("ERRCHK\n");
       //drain_serial_input();
       return;
     }
   }
-  Serial.println(input_data.BTN_NORTH);
-  delay(5);
 }
 
 inline void set_consts() {
-  if(input_data.ABS_LT > 100) {
-    mult = SLOW_MULT;
+  if(input_data.BTN_LB) {
+    if(slowmode_btn_avl) {
+      slowmode = !slowmode;
+    }
+    slowmode_btn_avl = false;
   } else {
-    mult = DEFAULT_MULT;
+    slowmode_btn_avl = true;
   }
   if(input_data.BTN_EAST) {
     if(depth_hold_btn_avl) {
@@ -307,6 +301,38 @@ inline void set_consts() {
     depth_hold_btn_avl = false;
   } else {
     depth_hold_btn_avl = true;
+  }
+  if(input_data.ABS_HAT0X == -1) {
+    if(gain_dec_btn_avl) {
+      if(input_data.ABS_LT > 100) {
+        if(SLOW_MULT > 0.1) {
+          SLOW_MULT -= 0.1;
+        }
+      } else {
+        if(DEFAULT_MULT > 0.1) {
+          DEFAULT_MULT -= 0.1;
+        }
+      }
+    }
+    gain_dec_btn_avl = false;
+  } else {
+    gain_dec_btn_avl = true;
+  }
+  if(input_data.ABS_HAT0X == 1) {
+    if(gain_inc_btn_avl) {
+      if(input_data.ABS_LT > 100) {
+        if(SLOW_MULT < 1) {
+          SLOW_MULT += 0.1;
+        }
+      } else {
+        if(DEFAULT_MULT < 1) {
+          DEFAULT_MULT += 0.1;
+        }
+      }
+    }
+    gain_inc_btn_avl = false;
+  } else {
+    gain_inc_btn_avl = true;
   }
   /*
   if(input_data.BTN_WEST) {
@@ -318,6 +344,11 @@ inline void set_consts() {
     stabilize_btn_avl = true;
   }
   */
+  if(slowmode) {
+    mult = SLOW_MULT;
+  } else {
+    mult = DEFAULT_MULT;
+  }
 }
 
 inline void read_pressure_data() {
@@ -368,9 +399,6 @@ inline void calc_trans_rot_power() {
   int32_t unscaled_bl_power;
   int32_t unscaled_br_power;
   double normalize = 1;
-  if(input_data.ABS_HAT0X != 0 || input_data.ABS_HAT0Y != 0) {
-
-  }
   if(!stabilize || abs(input_data.ABS_LX) > 2000 || abs(input_data.ABS_LY) > 2000 || abs(input_data.ABS_RX) > 2000 || abs(input_data.ABS_RY) > 2000 || input_data.ABS_HAT0X != 0 || input_data.ABS_HAT0Y != 0) {
     unscaled_fl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - NORMALIZE_JOYSTICK(input_data.ABS_LX) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
     unscaled_fr_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + NORMALIZE_JOYSTICK(input_data.ABS_LX) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
@@ -476,9 +504,7 @@ void loop() {
   limit_current();
   power_thrusters();
   prog_iter++;
-  Serial.println(prog_iter);
   if(prog_iter % SERIAL_TRANSMISSION_WRAP == 0) {
-    Serial.println(PWR_TO_AMPS(control_data.lvert_power) + PWR_TO_AMPS(control_data.rvert_power) + PWR_TO_AMPS(control_data.fl_power) + PWR_TO_AMPS(control_data.fr_power) + PWR_TO_AMPS(control_data.bl_power) + PWR_TO_AMPS(control_data.br_power));
-    Serial.println(aux_data.depth);
+    Serial.println(prog_iter);
   }
 }
