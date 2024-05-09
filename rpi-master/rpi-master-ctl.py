@@ -141,6 +141,15 @@ def monitor_socket_input():
         gamepad_inputs[gamepad_map[code]] = int(state)
     return
 
+def transmit_topside_socket():
+    time.sleep(1)
+    while(True):
+        nmea: str = "$RPCTL," + str(rov_data) + ",*FF" # dummy checksum
+        len_str: str = str(len(nmea)).zfill(4)
+        transmission = (len_str + nmea).encode('ASCII')
+        s.send(transmission)
+        time.sleep(0.2)
+
 def transmit_serial():
     time.sleep(1)
     while(True):
@@ -155,7 +164,6 @@ def main():
     temp_thread = threading.Thread(target=monitor_temp)
     temp_thread.daemon = True
     temp_thread.start()
-    time.sleep(2)
     while True:
         monitor_socket_input()
         if(ser.in_waiting > 0):

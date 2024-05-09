@@ -3,6 +3,7 @@ from inputs import get_gamepad
 import time
 import threading
 import typing
+import ast
 
 HOST = '192.168.68.43'
 PORT = 10110 # standard NMEA port
@@ -17,8 +18,28 @@ s.listen()
 print("listening for connection")
 conn, addr = s.accept()
 print("connection address:", addr)
+s.setblocking(0)
 
 nmea_bytes: bytes = b''
+rov_data: dict[str, str] = {}
+
+def monitor_socket_input():
+    global rov_data
+    time.sleep(1)
+    while True:
+        try:
+            datalen: int = int(s.recv(4).decode('ASCII'))
+            data: str = s.recv(datalen).decode('ASCII')
+            chunks: list[str] = data.split(",")
+            if chunks[0] != "$RPCTL":
+                print("Invalid NMEA header")
+                return
+            rov_data = ast.literal_eval(chunks[1])
+        except:
+            pass
+        print(rov_data)
+        time.sleep(0.15)
+
 
 def gamepad_to_nmea() -> bytes:
     events = get_gamepad()
@@ -34,8 +55,10 @@ def gamepad_to_nmea() -> bytes:
     return transmission
 
 def main():
+    monitor_socket_thread = threading.Thread(target=monitor_socket_input)
+    monitor_socket_thread.daemon = True
+    monitor_socket_thread.start()
     while True:
         conn.send(gamepad_to_nmea())
-
 main()
     
