@@ -549,7 +549,7 @@ inline void elim_deadzones() {
 }
 
 inline void transmit_rov_data() {
-  Serial.print("$ARSLV")
+  Serial.print("$ARSLV");
   /*
   int64_t* input_iter = &input_data;
   while((uint64_t)input_iter < &input_data + sizeof(input_data)) {
@@ -584,8 +584,8 @@ inline void transmit_rov_data() {
   Serial.print(",");
   Serial.print(depth_hold);
   Serial.print(",");
-  Serial.print(depth_hold_controller.target)
-  Serial.print(",")
+  Serial.print(depth_hold_controller.target);
+  Serial.print(",");
   Serial.print(stabilize);
   Serial.print(",");
   Serial.print(yaw_abs_cur);
@@ -612,11 +612,8 @@ void loop() {
   calc_trans_rot_power();
   limit_current();
   power_thrusters();
-  prog_iter++;
   if(prog_iter % SERIAL_TRANSMISSION_WRAP == 0) {
-    //Serial.println(orientation.pitch);
-    //Serial.println(orientation.roll);
-    //Serial.print("Stab: ");
-    //Serial.println(stabilize);
+    transmit_rov_data();
   }
+  prog_iter++;
 }
