@@ -1,0 +1,8 @@
+*.so
+*.swp
+*.o
+*.pyd
+*.exp
+*.lib
+*.obj
+rpi-master/nmea_encode_c_ext/build/*

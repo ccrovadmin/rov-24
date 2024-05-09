@@ -1,4 +1,5 @@
 import typing
+import glob
 import threading
 import serial
 import nmea_encode_c_ext.nmea_encode as nmea_encode
@@ -20,12 +21,13 @@ s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 print("socket created")
 try:
     s.connect((HOST, PORT))
+    s.setblocking(0)
     print("socket connected")
 except:
     print("socket connection failed")
     exit(1)
 
-gamepad_map = {
+logitech_f310_map: dict[str, int] = {
     "ABS_X": 0, # i16, LSX
     "ABS_Y": 1, # i16, LSY
     "ABS_RX": 2, # i16, RSX
@@ -46,38 +48,129 @@ gamepad_map = {
     "BTN_SELECT": 17 # 0, 1, Back
 }
 
+arslv_transmission_map: list[str] = [
+    "Left Vert Power",
+    "Right Vert Power",
+    "Front Left Power",
+    "Front Right Power",
+    "Back Left Power",
+    "Back Right Power",
+    "Depth",
+    "Pressure (mbar)",
+    "Yaw",
+    "Pitch",
+    "Roll",
+    "Slowmode",
+    "Depth Hold",
+    "Depth Hold Target",
+    "Stabilize",
+    "Yaw Absolute Current",
+    "Yaw Absolute Target",
+    "Yaw Relative Offset",
+    "Default Multiplier",
+    "Slow Multiplier"
+]
+
+rov_data: dict[str, str] = {
+    "Left Vert Power": "",
+    "Right Vert Power": "",
+    "Front Left Power": "",
+    "Front Right Power": "",
+    "Back Left Power": "",
+    "Back Right Power": "",
+    "Depth": "",
+    "Pressure (mbar)": "",
+    "Yaw": "",
+    "Pitch": "",
+    "Roll": "",
+    "Slowmode": "",
+    "Depth Hold": "",
+    "Depth Hold Target": "",
+    "Stabilize": "",
+    "Yaw Absolute Current": "",
+    "Yaw Absolute Target": "",
+    "Yaw Relative Offset": "",
+    "Default Multiplier": "",
+    "Slow Multiplier": "",
+    "External Temp (C)": ""
+}
+
+gamepad_map = logitech_f310_map
+
 gamepad_inputs: list[int] = [0] * GAMEPAD_NUM_INPUTS
 gamepad_input_tuple: tuple[int, ...] = tuple(gamepad_inputs)
+
+nmea_bytes = b''
 
 ser = serial.Serial(METRO_M4_PIPE, 9600, write_timeout = 2)
 ser.flush()
 
+# temperature code modified from
+# https://learn.adafruit.com/adafruits-raspberry-pi-lesson-11-ds18b20-temperature-sensing/hardware
+
+
+ds18b20s = glob.glob("/sys/bus/w1/devices/28*")[0] + "/w1_slave"
+
+def monitor_temp():
+    global external_temp_C
+    time.sleep(1)
+    f = open(ds18b20s, 'r')
+    lines = f.readlines()
+    while True:
+        if lines[0].strip()[-3:] != 'YES':
+            return
+        equals_pos = lines[1].find('t=')
+        if equals_pos == -1:
+            return
+        rov_data["External Temp (C)"] = lines[1][equals_pos+2:]
+        print(lines[1][equals_pos+2:])
+        time.sleep(0.2)
+
 def monitor_socket_input():
-    datalen: int = int(s.recv(4).decode('ASCII'))
+    try:
+        datalen: int = int(s.recv(4).decode('ASCII'))
+    except:
+        return         
     data: str = s.recv(datalen).decode('ASCII')
-    #print("Data received: ", data)
-    chunks: list[str] = data.split(",")
+    chunks: list[str] = data.split(",");
     if(chunks[0] != "$CTCTL"):
         print("Invalid NMEA header")
         return
     for event in chunks[1:]:
         code, state = event.split(":")
         gamepad_inputs[gamepad_map[code]] = int(state)
+    return
+
+def transmit_serial():
+    time.sleep(1)
+    while(True):
+        ser.write(nmea_bytes)
+        time.sleep(0.1)
 
 def main():
+    global nmea_bytes
+    transmission_thread = threading.Thread(target=transmit_serial)
+    transmission_thread.daemon = True
+    transmission_thread.start()
+    temp_thread = threading.Thread(target=monitor_temp)
+    temp_thread.daemon = True
+    temp_thread.start()
+    time.sleep(2)
     while True:
         monitor_socket_input()
         if(ser.in_waiting > 0):
             try:
-                line = ser.readline().decode('ASCII').rstrip()
-                print(line)
+                arslv_data = ser.readline().decode('ASCII').rstrip().split(",")
+                if arslv_data[0] != "$ARSLV":
+                    print("Invalid NMEA header")
+                    continue
+                for i in range(1, len(arslv_data)-1):
+                    rov_data[arslv_transmission_map[i-1]] = arslv_data[i]
+                print(rov_data)
             except UnicodeDecodeError:
                 print("check transmission code")
         gamepad_input_tuple = tuple(gamepad_inputs)
         #print(gamepad_input_tuple)
-        nmea_bytes: bytes = nmea_encode.nmea_encode(gamepad_input_tuple)
-        #print(nmea_bytes)
-        #print(ser.write(nmea_bytes))
-        ser.write(nmea_bytes)
+        nmea_bytes = nmea_encode.nmea_encode(gamepad_input_tuple)
 
 main()
