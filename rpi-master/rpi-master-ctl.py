@@ -47,6 +47,28 @@ logitech_f310_map = {
     "BTN_SELECT": 17 # 0, 1, Back
 }
 
+arslv_transmission: list[list[str]] = [
+    ["Left Vert Power", "0"],
+    ["Right Vert Power", "0"],
+    ["Front Left Power", "0"],
+    ["Front Right Power", "0"],
+    ["Back Left Power", "0"],
+    ["Back Right Power", "0"],
+    ["Depth", "0.0"],
+    ["Pressure (mbar)", "0.0"],
+    ["Yaw", "0.0"],
+    ["Pitch", "0.0"],
+    ["Roll", "0.0"],
+    ["Slowmode", "0"],
+    ["Depth Hold", "0"],
+    ["Depth Hold Target", "0.0"],
+    ["Stabilize", "0"],
+    ["Yaw Absolute Current", "0.0"],
+    ["Yaw Absolute Target", "0.0"],
+    ["Yaw Relative Offset", "0.0"],
+    ["Default Multiplier", "0.0"],
+    ["Slow Multiplier", "0.0"]
+]
 gamepad_map = logitech_f310_map
 
 gamepad_inputs: list[int] = [0] * GAMEPAD_NUM_INPUTS
@@ -87,8 +109,13 @@ def main():
         monitor_socket_input()
         if(ser.in_waiting > 0):
             try:
-                line = ser.readline().decode('ASCII').rstrip()
-                print(line)
+                arslv_data = ser.readline().decode('ASCII').rstrip().split(",")
+                if arslv_data[0] != "$ARSLV":
+                    print("Invalid NMEA header")
+                    continue
+                for i in range(1, len(arslv_data)-1):
+                    arslv_transmission[i-1][1] = arslv_data[i]
+                print(arslv_transmission)
             except UnicodeDecodeError:
                 print("check transmission code")
         gamepad_input_tuple = tuple(gamepad_inputs)

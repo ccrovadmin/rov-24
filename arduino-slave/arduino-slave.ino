@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -5,14 +6,14 @@
 #include <Servo.h>
 
 #include <Wire.h>
-
+#include <Adafruit_BNO08x.h>
 #include "MS5837.h"
 
 #define INC_PROG_ITER(i) i++
-#define SERIAL_TRANSMISSION_WRAP (3)
+#define SERIAL_TRANSMISSION_WRAP (5)
 
 #define AMP_LIMIT (20) // fuse melts at 25 amps, leave 5 amp clearance
-#define TRANS_ROT_AMP_LIMIT (15)
+#define TRANS_ROT_AMP_LIMIT (13)
 #define VERT_AMP_LIMIT (AMP_LIMIT - TRANS_ROT_AMP_LIMIT)
 // (AMPS) taken from blue robotics t200 specs @ 12V
 // https://cad.bluerobotics.com/T200-Public-Performance-Data-10-20V-September-2019.xlsx
@@ -34,6 +35,7 @@
 #define DPAD_VERT_GAIN ((double)0.45)
 
 #define ROT_GAIN ((double)0.3)
+#define STRAFE_GAIN ((double)0.5)
 
 #define DEADZONE_CONST 2000
 
@@ -128,12 +130,9 @@ typedef struct __attribute__((packed)) {
 } input_data_t;
 
 typedef struct {
-  double yaw;
-  double roll;
-  double pitch;
-  double x_accel;
-  double y_accel;
-  double z_accel;
+  //double x_accel;
+  //double y_accel;
+  //double z_accel;
   double pressure_mbar;
   double depth;
 } aux_data_t;
@@ -156,18 +155,29 @@ typedef struct {
   Servo br;
 } thrusters_t;
 
+typedef struct {
+  double yaw;
+  double pitch;
+  double roll;
+} orientation_t;
+
 // declared globally 
 uint64_t prog_iter;
 
 AMP_LIST;
 
 MS5837 bar02_sensor;
+Adafruit_BNO08x imu(-1); // -1 means i2c autodetect
 
-// hPa/mbar: 2, 0.0003, 0
+sh2_SensorValue_t sensor_value;
+
+// hPa/mbar: 3 0.0003, 0
 // deg: 3, 0.0003, 0
-PID depth_hold_controller(2, 0.0003, 0);
-PID roll_hold_controller(3, 0.0003, 0);
-PID yaw_hold_controller(3, 0.0003, 0);
+PID depth_hold_controller(3, 0.0003, 0);
+PID yaw_hold_controller(8, 0.0002, 0);
+int32_t yaw_abs_target = 0;
+int32_t yaw_abs_cur = 0;
+int32_t yaw_rel_offset = 0;
 
 double DEFAULT_MULT = (double)0.7;
 double SLOW_MULT = (double)0.3;
@@ -179,6 +189,7 @@ input_data_t input_data;
 aux_data_t aux_data;
 control_data_t control_data = {1500, 1500, 1500, 1500, 1500, 1500};
 thrusters_t thrusters;
+orientation_t orientation;
 
 double mult = DEFAULT_MULT;
 
@@ -196,7 +207,6 @@ bool stabilize_btn_avl = true;
 
 bool depth_set_avl = true;
 bool yaw_set_avl = true;
-bool roll_set_avl = true;
 
 char buff[200];
 
@@ -214,16 +224,31 @@ void setup() {
   thrusters.bl.attach(THRUSTER_BL_PIN);
   thrusters.br.attach(THRUSTER_BR_PIN);
 
-  roll_hold_controller.target = NEUTRAL_ROLL_DEG;
+  bar02_setup();
+  BNO08x_setup();
+  
+  Serial.setTimeout(10);
+  Serial.flush();
+}
 
+inline void bar02_setup() {
   while(!bar02_sensor.init()) {
     Serial.println("Failed to initialize bar02");
     delay(1000);
   }
   bar02_sensor.setModel(MS5837::MS5837_02BA);
   bar02_sensor.setFluidDensity(997);
-  Serial.setTimeout(10);
-  Serial.flush();
+}
+
+inline void BNO08x_setup() {
+  while(!imu.begin_I2C()) {
+    Serial.println("Failed to initialize BNO08x");
+    delay(1000);
+  }
+  while(!imu.enableReport(SH2_ARVR_STABILIZED_RV, 5000)) {
+    Serial.println("Failed to enable BNO08x reports");
+    delay(1000);
+  }
 }
 
 inline bool nmea_checksum() {
@@ -305,11 +330,11 @@ inline void set_consts() {
   if(input_data.ABS_HAT0X == -1) {
     if(gain_dec_btn_avl) {
       if(input_data.ABS_LT > 100) {
-        if(SLOW_MULT > 0.1) {
+        if(SLOW_MULT >= 0.2) {
           SLOW_MULT -= 0.1;
         }
       } else {
-        if(DEFAULT_MULT > 0.1) {
+        if(DEFAULT_MULT >= 0.2) {
           DEFAULT_MULT -= 0.1;
         }
       }
@@ -321,11 +346,11 @@ inline void set_consts() {
   if(input_data.ABS_HAT0X == 1) {
     if(gain_inc_btn_avl) {
       if(input_data.ABS_LT > 100) {
-        if(SLOW_MULT < 1) {
+        if(SLOW_MULT <= 0.9) {
           SLOW_MULT += 0.1;
         }
       } else {
-        if(DEFAULT_MULT < 1) {
+        if(DEFAULT_MULT <= 0.9) {
           DEFAULT_MULT += 0.1;
         }
       }
@@ -334,7 +359,6 @@ inline void set_consts() {
   } else {
     gain_inc_btn_avl = true;
   }
-  /*
   if(input_data.BTN_WEST) {
     if(stabilize_btn_avl) {
       stabilize = !stabilize;
@@ -343,7 +367,6 @@ inline void set_consts() {
   } else {
     stabilize_btn_avl = true;
   }
-  */
   if(slowmode) {
     mult = SLOW_MULT;
   } else {
@@ -359,9 +382,33 @@ inline void read_pressure_data() {
   aux_data.pressure_mbar = bar02_sensor.pressure();
 }
 
-inline void read_gyro_data() {
+// https://github.com/adafruit/Adafruit_BNO08x/blob/master/examples/quaternion_yaw_pitch_roll/quaternion_yaw_pitch_roll.ino
+inline void quaternionToEuler(float qr, float qi, float qj, float qk) {
+    float sqr = sq(qr);
+    float sqi = sq(qi);
+    float sqj = sq(qj);
+    float sqk = sq(qk);
+
+    orientation.yaw = atan2(2.0 * (qi * qj + qk * qr), (sqi - sqj - sqk + sqr));
+    orientation.pitch = asin(-2.0 * (qi * qk - qj * qr) / (sqi + sqj + sqk + sqr));
+    orientation.roll = atan2(2.0 * (qj * qk + qi * qr), (-sqi - sqj + sqk + sqr));
+
+    orientation.yaw *= RAD_TO_DEG;
+    orientation.pitch *= RAD_TO_DEG;
+    orientation.roll *= RAD_TO_DEG;
+}
+
+inline void quaternionToEulerRV(sh2_RotationVectorWAcc_t* rotational_vector) {
+    quaternionToEuler(rotational_vector->real, rotational_vector->i, rotational_vector->j, rotational_vector->k);
+}
+
+inline void read_imu_data() {
   //#define rconv ((double)150/JOYSTICK_MAGNITUDE)
   //aux_data.roll = input_data.ABS_LX * rconv;
+  if(imu.getSensorEvent(&sensor_value)) {
+    quaternionToEulerRV(&sensor_value.un.arvrStabilizedRV);
+  }
+  yaw_abs_cur = ((int32_t)orientation.yaw + 360) % 360;
 }
 
 inline void calc_vert_power() {
@@ -382,7 +429,7 @@ inline void calc_vert_power() {
       Serial.print("--------------> Depth set: ");
       Serial.println(depth_hold_controller.target);
     }
-    unscaled_vert_power = (depth_hold_controller.compute_PID(aux_data.pressure_mbar) * (double)PID_REVERSE);
+    unscaled_vert_power = (depth_hold_controller.compute_PID(aux_data.pressure_mbar) * (double)THRUSTER_VERT_DIR * (double)PID_REVERSE);
     if(unscaled_vert_power > ESC_MAGNITUDE) {
       unscaled_vert_power = ESC_MAGNITUDE;
     } else if(unscaled_vert_power < -ESC_MAGNITUDE) {
@@ -399,11 +446,12 @@ inline void calc_trans_rot_power() {
   int32_t unscaled_bl_power;
   int32_t unscaled_br_power;
   double normalize = 1;
-  if(!stabilize || abs(input_data.ABS_LX) > 2000 || abs(input_data.ABS_LY) > 2000 || abs(input_data.ABS_RX) > 2000 || abs(input_data.ABS_RY) > 2000 || input_data.ABS_HAT0X != 0 || input_data.ABS_HAT0Y != 0) {
-    unscaled_fl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - NORMALIZE_JOYSTICK(input_data.ABS_LX) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
-    unscaled_fr_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + NORMALIZE_JOYSTICK(input_data.ABS_LX) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
-    unscaled_bl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - NORMALIZE_JOYSTICK(input_data.ABS_LX) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
-    unscaled_br_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + NORMALIZE_JOYSTICK(input_data.ABS_LX) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+  if(!stabilize || abs(input_data.ABS_LX) > DEADZONE_CONST || abs(input_data.ABS_LY) > DEADZONE_CONST || abs(input_data.ABS_RX) > DEADZONE_CONST || abs(input_data.ABS_RY) > 2000 || input_data.ABS_HAT0X != 0 || input_data.ABS_HAT0Y != 0) {
+    yaw_set_avl = true;
+    unscaled_fl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    unscaled_fr_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    unscaled_bl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    unscaled_br_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
     if ((NORMALIZE_JOYSTICK(abs(input_data.ABS_LY)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_LX)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_RX))) > ESC_MAGNITUDE) {
       normalize = (NORMALIZE_JOYSTICK(abs(input_data.ABS_LY)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_LX)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_RX)))/(double)ESC_MAGNITUDE;
     }
@@ -417,12 +465,18 @@ inline void calc_trans_rot_power() {
     control_data.bl_power = unscaled_bl_power * THRUSTER_BL_DIR;
     control_data.br_power = unscaled_br_power * THRUSTER_BR_DIR;
   } else if(stabilize) {
-    double roll_power = roll_hold_controller.compute_PID(aux_data.roll);
-    control_data.lvert_power += roll_power;
-    control_data.rvert_power += roll_power;
-    if(abs(control_data.lvert_power) > ESC_MAGNITUDE || abs(control_data.lvert_power) > ESC_MAGNITUDE) {
-      
+    if(yaw_set_avl) {
+      yaw_set_avl = false;
+      yaw_hold_controller.reset_PID();
+      yaw_hold_controller.target = 0;
+      yaw_abs_target = ((int32_t)orientation.yaw + 360) % 360;
     }
+    yaw_rel_offset = (int32_t)((yaw_abs_target - yaw_abs_cur + 540)%360)-180;
+    int32_t pwr = yaw_hold_controller.compute_PID(yaw_rel_offset);
+    control_data.fl_power = pwr * THRUSTER_FL_DIR * PID_REVERSE;
+    control_data.fr_power = pwr * THRUSTER_FR_DIR;
+    control_data.bl_power = pwr * THRUSTER_BL_DIR;
+    control_data.br_power = pwr * THRUSTER_BR_DIR * PID_REVERSE;
   }
 }
 
@@ -494,17 +548,75 @@ inline void elim_deadzones() {
   }
 }
 
+inline void transmit_rov_data() {
+  Serial.print("$ARSLV")
+  /*
+  int64_t* input_iter = &input_data;
+  while((uint64_t)input_iter < &input_data + sizeof(input_data)) {
+    Serial.print(",");
+    Serial.print(*input_iter);
+    input_iter++;
+  }*/
+  Serial.print(",");
+  Serial.print(control_data.lvert_power);
+  Serial.print(",");
+  Serial.print(control_data.rvert_power);
+  Serial.print(",");
+  Serial.print(control_data.fl_power);
+  Serial.print(",");
+  Serial.print(control_data.fr_power);
+  Serial.print(",");
+  Serial.print(control_data.bl_power);
+  Serial.print(",");
+  Serial.print(control_data.br_power);
+  Serial.print(",");
+  Serial.print(aux_data.depth);
+  Serial.print(",");
+  Serial.print(aux_data.pressure_mbar);
+  Serial.print(",");
+  Serial.print(orientation.yaw);
+  Serial.print(",");
+  Serial.print(orientation.pitch);
+  Serial.print(",");
+  Serial.print(orientation.roll);
+  Serial.print(",");
+  Serial.print(slowmode);
+  Serial.print(",");
+  Serial.print(depth_hold);
+  Serial.print(",");
+  Serial.print(depth_hold_controller.target)
+  Serial.print(",")
+  Serial.print(stabilize);
+  Serial.print(",");
+  Serial.print(yaw_abs_cur);
+  Serial.print(",");
+  Serial.print(yaw_abs_target);
+  Serial.print(",");
+  Serial.print(yaw_rel_offset);
+  Serial.print(",");
+  Serial.print(DEFAULT_MULT);
+  Serial.print(",");
+  Serial.print(SLOW_MULT);
+  Serial.print(",");
+  // throaway checksum
+  Serial.println("*FF");
+}
+
 void loop() {
   read_serial_input();
   elim_deadzones();
   set_consts();
   read_pressure_data();
+  read_imu_data();
   calc_vert_power();
   calc_trans_rot_power();
   limit_current();
   power_thrusters();
   prog_iter++;
   if(prog_iter % SERIAL_TRANSMISSION_WRAP == 0) {
-    Serial.println(prog_iter);
+    //Serial.println(orientation.pitch);
+    //Serial.println(orientation.roll);
+    //Serial.print("Stab: ");
+    //Serial.println(stabilize);
   }
 }
