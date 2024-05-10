@@ -6,3 +6,4 @@
 *.lib
 *.obj
 rpi-master/nmea_encode_c_ext/build/*
+scratch/*

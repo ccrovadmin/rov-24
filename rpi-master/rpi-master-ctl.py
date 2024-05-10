@@ -114,16 +114,19 @@ ds18b20s = glob.glob("/sys/bus/w1/devices/28*")[0] + "/w1_slave"
 def monitor_temp():
     global external_temp_C
     time.sleep(1)
-    f = open(ds18b20s, 'r')
-    lines = f.readlines()
     while True:
+        f = open(ds18b20s, 'r')
+        lines = f.readlines()
+        f.close()
         if lines[0].strip()[-3:] != 'YES':
-            return
+            time.sleep(0.2)
+            continue
         equals_pos = lines[1].find('t=')
         if equals_pos == -1:
-            return
-        rov_data["External Temp (C)"] = lines[1][equals_pos+2:]
-        print(lines[1][equals_pos+2:])
+            time.sleep(0.2)
+            continue
+        rov_data["External Temp (C)"] = lines[1][equals_pos+2:-1]
+        print(lines[1][equals_pos+2:-1])
         time.sleep(0.2)
 
 def monitor_socket_input():
@@ -134,7 +137,7 @@ def monitor_socket_input():
     data: str = s.recv(datalen).decode('ASCII')
     chunks: list[str] = data.split(",");
     if(chunks[0] != "$CTCTL"):
-        print("Invalid NMEA header")
+        print("Invalid NMEA header topside")
         return
     for event in chunks[1:]:
         code, state = event.split(":")
@@ -144,6 +147,7 @@ def monitor_socket_input():
 def transmit_topside_socket():
     time.sleep(1)
     while(True):
+        print(rov_data)
         nmea: str = "$RPCTL," + str(rov_data) + ",*FF" # dummy checksum
         len_str: str = str(len(nmea)).zfill(4)
         transmission = (len_str + nmea).encode('ASCII')
@@ -164,19 +168,22 @@ def main():
     temp_thread = threading.Thread(target=monitor_temp)
     temp_thread.daemon = True
     temp_thread.start()
+    topside_thread = threading.Thread(target=transmit_topside_socket)
+    topside_thread.daemon = True
+    topside_thread.start()
     while True:
         monitor_socket_input()
         if(ser.in_waiting > 0):
             try:
                 arslv_data = ser.readline().decode('ASCII').rstrip().split(",")
                 if arslv_data[0] != "$ARSLV":
-                    print("Invalid NMEA header")
+                    print("Invalid NMEA header arduino")
                     continue
+                # first and last elements are header and checksum
                 for i in range(1, len(arslv_data)-1):
                     rov_data[arslv_transmission_map[i-1]] = arslv_data[i]
-                print(rov_data)
             except UnicodeDecodeError:
-                print("check transmission code")
+                print("unicode decode error")
         gamepad_input_tuple = tuple(gamepad_inputs)
         #print(gamepad_input_tuple)
         nmea_bytes = nmea_encode.nmea_encode(gamepad_input_tuple)

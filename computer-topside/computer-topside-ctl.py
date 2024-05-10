@@ -28,14 +28,15 @@ def monitor_socket_input():
     time.sleep(1)
     while True:
         try:
-            datalen: int = int(s.recv(4).decode('ASCII'))
-            data: str = s.recv(datalen).decode('ASCII')
+            datalen: int = int(conn.recv(4).decode('ASCII'))
+            data: str = conn.recv(datalen).decode('ASCII')
             chunks: list[str] = data.split(",")
+            rov_data_str: str = ",".join(chunks[1:-1])
             if chunks[0] != "$RPCTL":
                 print("Invalid NMEA header")
                 return
-            rov_data = ast.literal_eval(chunks[1])
-        except:
+            rov_data = ast.literal_eval(rov_data_str)
+        except ValueError:
             pass
         print(rov_data)
         time.sleep(0.15)

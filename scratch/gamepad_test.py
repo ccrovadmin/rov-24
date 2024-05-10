@@ -1,4 +1,5 @@
 import inputs
+import ast
 import typing
 
 logitech_f310_map = {
@@ -23,10 +24,11 @@ logitech_f310_map = {
 }
 
 gamepad_inputs: list[int] = [0] * 18
-
+a = {"a": 1, "b": 2}
 while True:
-    events = inputs.get_gamepad()
-    for event in events:
-        if(event.code != "SYN_REPORT"):
-            gamepad_inputs[logitech_f310_map[event.code]] = event.state
-    print(gamepad_inputs)
+    #events = inputs.get_gamepad()
+    #for event in events:
+    #    if(event.code != "SYN_REPORT"):
+    #        gamepad_inputs[logitech_f310_map[event.code]] = event.state
+    #print(gamepad_inputs)
+    print(ast.literal_eval(str(a)))
