@@ -34,8 +34,9 @@
 
 #define DPAD_VERT_GAIN ((double)0.45)
 
-#define ROT_GAIN ((double)0.3)
-#define STRAFE_GAIN ((double)0.5)
+#define ROT_GAIN ((double)0.4)
+#define STRAFE_GAIN ((double)0.6)
+#define FOR_BACK_GAIN ((double)0.7)
 
 #define DEADZONE_CONST 2000
 
@@ -74,7 +75,7 @@ class PID {
 
     PID(double kp, double ki, double kd);
     double compute_PID(double input);
-    void reset_PID();
+    void reset_PID(bool reset_integral);
 };
 
 PID::PID(double kp, double ki, double kd) {
@@ -102,10 +103,12 @@ double PID::compute_PID(double input) {
   return Kp * cur_err + Ki * tot_err + Kd * drv_err;
 }
 
-void PID::reset_PID() {
+void PID::reset_PID(bool reset_integral) {
   prev_time = millis();
   prev_err = 0;
-  tot_err = 0;
+  if(reset_integral) {
+    tot_err = 0;
+  }
 }
 
 typedef struct __attribute__((packed)) {
@@ -171,10 +174,10 @@ Adafruit_BNO08x imu(-1); // -1 means i2c autodetect
 
 sh2_SensorValue_t sensor_value;
 
-// hPa/mbar: 3 0.0003, 0
-// deg: 3, 0.0003, 0
-PID depth_hold_controller(3, 0.0003, 0);
-PID yaw_hold_controller(8, 0.0002, 0);
+// hPa/mbar
+PID depth_hold_controller(3.5, 0.0003, 0);
+// deg
+PID yaw_hold_controller(4, 0.0002, 0);
 int32_t yaw_abs_target = 0;
 int32_t yaw_abs_cur = 0;
 int32_t yaw_rel_offset = 0;
@@ -424,7 +427,7 @@ inline void calc_vert_power() {
   } else if(depth_hold) {
     if(depth_set_avl) {
       depth_set_avl = false;
-      depth_hold_controller.reset_PID();
+      depth_hold_controller.reset_PID(false);
       depth_hold_controller.target = aux_data.pressure_mbar;
       Serial.print("--------------> Depth set: ");
       Serial.println(depth_hold_controller.target);
@@ -448,10 +451,10 @@ inline void calc_trans_rot_power() {
   double normalize = 1;
   if(!stabilize || abs(input_data.ABS_LX) > DEADZONE_CONST || abs(input_data.ABS_LY) > DEADZONE_CONST || abs(input_data.ABS_RX) > DEADZONE_CONST || abs(input_data.ABS_RY) > 2000 || input_data.ABS_HAT0X != 0 || input_data.ABS_HAT0Y != 0) {
     yaw_set_avl = true;
-    unscaled_fl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
-    unscaled_fr_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
-    unscaled_bl_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) - (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
-    unscaled_br_power = NORMALIZE_JOYSTICK(input_data.ABS_LY) + (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    unscaled_fl_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) - (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    unscaled_fr_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) + (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    unscaled_bl_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) - (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    unscaled_br_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) + (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
     if ((NORMALIZE_JOYSTICK(abs(input_data.ABS_LY)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_LX)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_RX))) > ESC_MAGNITUDE) {
       normalize = (NORMALIZE_JOYSTICK(abs(input_data.ABS_LY)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_LX)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_RX)))/(double)ESC_MAGNITUDE;
     }
@@ -467,7 +470,7 @@ inline void calc_trans_rot_power() {
   } else if(stabilize) {
     if(yaw_set_avl) {
       yaw_set_avl = false;
-      yaw_hold_controller.reset_PID();
+      yaw_hold_controller.reset_PID(true);
       yaw_hold_controller.target = 0;
       yaw_abs_target = ((int32_t)orientation.yaw + 360) % 360;
     }
