@@ -126,7 +126,7 @@ def monitor_temp():
             time.sleep(0.2)
             continue
         rov_data["External Temp (C)"] = lines[1][equals_pos+2:-1]
-        print(lines[1][equals_pos+2:-1])
+        #print(lines[1][equals_pos+2:-1])
         time.sleep(0.2)
 
 def monitor_socket_input():
