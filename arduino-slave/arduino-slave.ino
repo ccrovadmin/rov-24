@@ -324,7 +324,6 @@ inline void set_consts() {
   if(input_data.BTN_EAST) {
     if(depth_hold_btn_avl) {
       depth_hold = !depth_hold;
-      stabilize = false;
     }
     depth_hold_btn_avl = false;
   } else {

@@ -1,4 +1,6 @@
 import typing
+import board
+from adafruit_ms8607 import MS8607
 import glob
 import threading
 import serial
@@ -92,7 +94,10 @@ rov_data: dict[str, str] = {
     "Yaw Relative Offset": "",
     "Default Multiplier": "",
     "Slow Multiplier": "",
-    "External Temp (C)": ""
+    "External Temp (C)": "",
+    "Internal Pressure (mbar)": "",
+    "Internal Temp (C)": "",
+    "Internal Humidity (%)": "",
 }
 
 gamepad_map = logitech_f310_map
@@ -105,16 +110,21 @@ nmea_bytes = b''
 ser = serial.Serial(METRO_M4_PIPE, 9600, write_timeout = 2)
 ser.flush()
 
-# temperature code modified from
+i2c = board.I2C()
+pht = MS8607(i2c)
+
+# ext temperature code modified from
 # https://learn.adafruit.com/adafruits-raspberry-pi-lesson-11-ds18b20-temperature-sensing/hardware
 
 
 ds18b20s = glob.glob("/sys/bus/w1/devices/28*")[0] + "/w1_slave"
 
 def monitor_temp():
-    global external_temp_C
     time.sleep(1)
     while True:
+        rov_data["Internal Pressure (mbar)"] = str(pht.pressure)
+        rov_data["Internal Temp (C)"] = str(pht.temperature)
+        rov_data["Internal Humidity (%)"] = str(pht.relative_humidity)
         f = open(ds18b20s, 'r')
         lines = f.readlines()
         f.close()
@@ -126,7 +136,6 @@ def monitor_temp():
             time.sleep(0.2)
             continue
         rov_data["External Temp (C)"] = lines[1][equals_pos+2:-1]
-        #print(lines[1][equals_pos+2:-1])
         time.sleep(0.2)
 
 def monitor_socket_input():
