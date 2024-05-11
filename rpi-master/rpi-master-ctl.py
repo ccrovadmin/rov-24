@@ -120,7 +120,6 @@ pht = MS8607(i2c)
 ds18b20s = glob.glob("/sys/bus/w1/devices/28*")[0] + "/w1_slave"
 
 def monitor_temp():
-    time.sleep(1)
     while True:
         rov_data["Internal Pressure (mbar)"] = str(pht.pressure)
         rov_data["Internal Temp (C)"] = str(pht.temperature)
