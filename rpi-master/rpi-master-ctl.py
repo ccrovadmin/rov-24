@@ -9,7 +9,7 @@ import time
 import serial.tools.list_ports
 import socket
 
-HOST = '192.168.68.43'
+HOST = '192.168.68.42'
 PORT = 10110 # standard NMEA port
 
 METRO_M4_PIPE: str = '/dev/ttyACM0'
@@ -70,7 +70,8 @@ arslv_transmission_map: list[str] = [
     "Yaw Absolute Target",
     "Yaw Relative Offset",
     "Default Multiplier",
-    "Slow Multiplier"
+    "Slow Multiplier",
+    "Vehd Mode"
 ]
 
 rov_data: dict[str, str] = {
@@ -94,6 +95,7 @@ rov_data: dict[str, str] = {
     "Yaw Relative Offset": "",
     "Default Multiplier": "",
     "Slow Multiplier": "",
+    "Vehd Mode": "",
     "External Temp (C)": "",
     "Internal Pressure (mbar)": "",
     "Internal Temp (C)": "",
@@ -115,7 +117,6 @@ pht = MS8607(i2c)
 
 # ext temperature code modified from
 # https://learn.adafruit.com/adafruits-raspberry-pi-lesson-11-ds18b20-temperature-sensing/hardware
-
 
 ds18b20s = glob.glob("/sys/bus/w1/devices/28*")[0] + "/w1_slave"
 

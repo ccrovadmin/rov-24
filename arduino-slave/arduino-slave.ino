@@ -38,7 +38,7 @@
 #define STRAFE_GAIN ((double)0.6)
 #define FOR_BACK_GAIN ((double)0.7)
 
-#define DEADZONE_CONST 2000
+#define DEADZONE_CONST 1000
 
 #define NEUTRAL_ROLL_DEG 0
 
@@ -49,11 +49,11 @@
 #define THRUSTER_BL_PIN 6
 #define THRUSTER_BR_PIN 7
 
-#define THRUSTER_VERT_DIR -1
-#define THRUSTER_FL_DIR -1
-#define THRUSTER_FR_DIR -1
-#define THRUSTER_BL_DIR 1
-#define THRUSTER_BR_DIR 1
+#define THRUSTER_VERT_DIR -1 // cw df
+#define THRUSTER_FL_DIR 1 // ccw bf
+#define THRUSTER_FR_DIR -1 // cw bf
+#define THRUSTER_BL_DIR -1 // ccw ff
+#define THRUSTER_BR_DIR 1 // cw ff
 
 class PID {
   #define PID_FORWARD 1
@@ -175,9 +175,9 @@ Adafruit_BNO08x imu(-1); // -1 means i2c autodetect
 sh2_SensorValue_t sensor_value;
 
 // hPa/mbar
-PID depth_hold_controller(3.5, 0.0003, 0);
+PID depth_hold_controller(4.15, 0.0003, 0);
 // deg
-PID yaw_hold_controller(4, 0.0002, 0);
+PID yaw_hold_controller(4.5, 0.0002, 0);
 int32_t yaw_abs_target = 0;
 int32_t yaw_abs_cur = 0;
 int32_t yaw_rel_offset = 0;
@@ -195,6 +195,9 @@ thrusters_t thrusters;
 orientation_t orientation;
 
 double mult = DEFAULT_MULT;
+
+bool swap_crab_rot = false;
+bool swap_crab_rot_btn_avl = true;
 
 bool slowmode = false;
 bool slowmode_btn_avl = true;
@@ -374,6 +377,14 @@ inline void set_consts() {
   } else {
     mult = DEFAULT_MULT;
   }
+  if(input_data.BTN_THUMBR) {
+    if(swap_crab_rot_btn_avl) {
+      swap_crab_rot = !swap_crab_rot;
+    }
+    swap_crab_rot_btn_avl = false;
+  } else {
+    swap_crab_rot_btn_avl = true;
+  }
 }
 
 inline void read_pressure_data() {
@@ -423,6 +434,9 @@ inline void calc_vert_power() {
   if(!depth_hold || abs(input_data.ABS_RY) > 150) {
     depth_set_avl = true;
     unscaled_vert_power = NORMALIZE_JOYSTICK(input_data.ABS_RY) * mult * THRUSTER_VERT_DIR;
+    if(!slowmode) {
+      log_power(false, true);
+    }
   } else if(depth_hold) {
     if(depth_set_avl) {
       depth_set_avl = false;
@@ -447,13 +461,22 @@ inline void calc_trans_rot_power() {
   int32_t unscaled_fr_power;
   int32_t unscaled_bl_power;
   int32_t unscaled_br_power;
+  int32_t crab;
+  int32_t rot;
   double normalize = 1;
   if(!stabilize || abs(input_data.ABS_LX) > DEADZONE_CONST || abs(input_data.ABS_LY) > DEADZONE_CONST || abs(input_data.ABS_RX) > DEADZONE_CONST || abs(input_data.ABS_RY) > 2000 || input_data.ABS_HAT0X != 0 || input_data.ABS_HAT0Y != 0) {
     yaw_set_avl = true;
-    unscaled_fl_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) - (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
-    unscaled_fr_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) + (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
-    unscaled_bl_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) - (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
-    unscaled_br_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) + (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LX)) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(input_data.ABS_RX));
+    if(swap_crab_rot) {
+      crab = input_data.ABS_RX;
+      rot = input_data.ABS_LX;
+    } else {
+      crab = input_data.ABS_LX;
+      rot = input_data.ABS_RX;
+    }
+    unscaled_fl_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) - (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(crab)) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(rot));
+    unscaled_fr_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) + (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(crab)) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(rot));
+    unscaled_bl_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) - (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(crab)) + (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(rot));
+    unscaled_br_power = (int32_t)(FOR_BACK_GAIN * (double)NORMALIZE_JOYSTICK(input_data.ABS_LY)) + (int32_t)(STRAFE_GAIN * (double)NORMALIZE_JOYSTICK(crab)) - (int32_t)(ROT_GAIN*(double)NORMALIZE_JOYSTICK(rot));
     if ((NORMALIZE_JOYSTICK(abs(input_data.ABS_LY)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_LX)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_RX))) > ESC_MAGNITUDE) {
       normalize = (NORMALIZE_JOYSTICK(abs(input_data.ABS_LY)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_LX)) + NORMALIZE_JOYSTICK(abs(input_data.ABS_RX)))/(double)ESC_MAGNITUDE;
     }
@@ -466,6 +489,9 @@ inline void calc_trans_rot_power() {
     control_data.fr_power = unscaled_fr_power * THRUSTER_FR_DIR;
     control_data.bl_power = unscaled_bl_power * THRUSTER_BL_DIR;
     control_data.br_power = unscaled_br_power * THRUSTER_BR_DIR;
+    if(!slowmode) {
+      log_power(true, false);
+    }
   } else if(stabilize) {
     if(yaw_set_avl) {
       yaw_set_avl = false;
@@ -479,6 +505,19 @@ inline void calc_trans_rot_power() {
     control_data.fr_power = pwr * THRUSTER_FR_DIR;
     control_data.bl_power = pwr * THRUSTER_BL_DIR;
     control_data.br_power = pwr * THRUSTER_BR_DIR * PID_REVERSE;
+  }
+}
+
+inline void log_power(bool trans, bool vert) {
+  if(trans) {
+    control_data.fl_power = control_data.fl_power*(log(abs(control_data.fl_power))/log(ESC_MAGNITUDE));
+    control_data.fr_power = control_data.fr_power*(log(abs(control_data.fr_power))/log(ESC_MAGNITUDE));
+    control_data.bl_power = control_data.bl_power*(log(abs(control_data.bl_power))/log(ESC_MAGNITUDE));
+    control_data.br_power = control_data.br_power*(log(abs(control_data.br_power))/log(ESC_MAGNITUDE));
+  }
+  if(vert) {
+    control_data.lvert_power = control_data.lvert_power*(log(abs(control_data.lvert_power))/log(ESC_MAGNITUDE));
+    control_data.rvert_power = control_data.rvert_power*(log(abs(control_data.rvert_power))/log(ESC_MAGNITUDE));
   }
 }
 
@@ -599,6 +638,8 @@ inline void transmit_rov_data() {
   Serial.print(DEFAULT_MULT);
   Serial.print(",");
   Serial.print(SLOW_MULT);
+  Serial.print(",");
+  Serial.print(swap_crab_rot);
   Serial.print(",");
   // throaway checksum
   Serial.println("*FF");

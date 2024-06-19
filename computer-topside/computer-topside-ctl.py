@@ -77,7 +77,7 @@ main()
 
 root = Tk()
 root.title("ROV Data")
-root.geometry("1400x300")
+root.geometry("1500x300")
 
 depth_hold_lbl = Label(root, text="Depth Hold: OFF", font="Arial 25")
 depth_hold_lbl.grid(row=1, column=1)
@@ -109,6 +109,9 @@ int_humid_lbl.grid(row=7, column=5)
 ext_temp_lbl = Label(root, text="External Temp: 0.00", font="Arial 25")
 ext_temp_lbl.grid(row=1, column=7)
 
+vehd_mode_lbl = Label(root, text="Vehd Mode: OFF", font="Arial 25")
+vehd_mode_lbl.grid(row=4, column=7)
+
 col_count, row_count = root.grid_size()
 
 for col in range(col_count):
@@ -120,18 +123,19 @@ for row in range(row_count):
 def update_labels():
     if(rov_data == {}):
         return
-    depth_hold_lbl.config(text="Depth Hold: " + ("ON {:0.2f}".format(mbar_to_depth(float(rov_data["Depth Hold Target"])))) if rov_data["Depth Hold"] == "1" else "OFF")
-    yaw_hold_lbl.config(text="Yaw Stabilize: " + "ON" if rov_data["Stabilize"] == "1" else "OFF")
-    slowmode_lbl.config(text="Slowmode: " + "ON" if rov_data["Slowmode"] == "1" else "OFF")
+    depth_hold_lbl.config(text="Depth Hold: " + (("ON {:0.2f}".format(mbar_to_depth(float(rov_data["Depth Hold Target"])))) if rov_data["Depth Hold"] == "1" else "OFF"))
+    yaw_hold_lbl.config(text="Yaw Stabilize: " + ("ON" if rov_data["Stabilize"] == "1" else "OFF"))
+    slowmode_lbl.config(text="Slowmode: " + ("ON" if rov_data["Slowmode"] == "1" else "OFF"))
     depth_lbl.config(text="Depth: " + rov_data["Depth"])
     default_gain_lbl.config(text="Default Gain: " + rov_data["Default Multiplier"])
     slow_gain_lbl.config(text="Slow Gain: " + rov_data["Slow Multiplier"])
     int_temp_lbl.config(text="Internal Temp: " + rov_data["Internal Temp (C)"])
     int_pres_lbl.config(text="Internal Pressure: {:0.2f}".format(float(rov_data["Internal Pressure (mbar)"])))
     int_humid_lbl.config(text="Internal Humidity: {:0.2f}".format(float(rov_data["Internal Humidity (%)"])))
-    ext_temp_lbl.config(text="External Temp: {:0.2f}".format(float(rov_data["External Temp (C)"])/100))
+    ext_temp_lbl.config(text="External Temp: {:0.2f}".format(float(rov_data["External Temp (C)"])/1000))
+    vehd_mode_lbl.config(text="Vehd Mode: " + ("ON" if rov_data["Vehd Mode"] == "1" else "OFF"))
     root.after(100, update_labels)
 
-time.sleep(1)
+time.sleep(3)
 update_labels()
 root.mainloop()
