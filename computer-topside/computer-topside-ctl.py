@@ -6,7 +6,7 @@ import typing
 import ast
 from tkinter import *
 
-HOST = '192.168.68.43'
+HOST = '192.168.68.42'
 PORT = 10110 # standard NMEA port
 
 NMEA_HEADER = "$CTCTL" # computer topside control
